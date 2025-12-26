@@ -1,0 +1,197 @@
+/**
+ * API Client for Prompt Master Backend
+ */
+
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+
+export interface OptimizeRequest {
+  prompt: string;
+  goal: string;
+  force_agent?: "coding" | "creative" | "analyst" | "general" | null;
+  project_id?: string | null;
+}
+
+export interface RoutingInfo {
+  confidence: number;
+  reasoning: string;
+}
+
+export interface OptimizeResponse {
+  original_prompt: string;
+  goal: string;
+  agent: string;
+  routing: RoutingInfo;
+  score: number;
+  feedback: string;
+  optimized_prompt: string;
+  error?: string | null;
+}
+
+export interface Agent {
+  name: string;
+  description: string;
+}
+
+export interface AgentsResponse {
+  agents: Agent[];
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  created_at?: string;
+}
+
+export interface ProjectsResponse {
+  projects: Project[];
+}
+
+export interface PromptHistoryItem {
+  id: string;
+  prompt_text: string;
+  agent_used: string;
+  score: number;
+  optimized_prompt?: string;
+  created_at?: string;
+}
+
+export interface PromptHistoryResponse {
+  history: PromptHistoryItem[];
+}
+
+class ApiClient {
+  private token: string | null = null;
+
+  setToken(token: string | null) {
+    this.token = token;
+  }
+
+  private getHeaders(): HeadersInit {
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+    };
+    if (this.token) {
+      headers["Authorization"] = `Bearer ${this.token}`;
+    }
+    return headers;
+  }
+
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const url = `${API_BASE_URL}${endpoint}`;
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        ...this.getHeaders(),
+        ...options.headers,
+      },
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `API Error: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  // ============ Prompt Endpoints ============
+
+  async optimizePrompt(request: OptimizeRequest): Promise<OptimizeResponse> {
+    return this.request<OptimizeResponse>("/prompts/optimize", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+  }
+
+  async listAgents(): Promise<AgentsResponse> {
+    return this.request<AgentsResponse>("/prompts/agents");
+  }
+
+  async analyzePrompt(request: OptimizeRequest): Promise<{
+    prompt: string;
+    goal: string;
+    recommended_agent: string;
+    confidence: number;
+    reasoning: string;
+  }> {
+    return this.request("/prompts/analyze-only", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+  }
+
+  // ============ Project Endpoints ============
+
+  async createProject(name: string): Promise<Project> {
+    return this.request<Project>("/projects", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async listProjects(): Promise<ProjectsResponse> {
+    return this.request<ProjectsResponse>("/projects");
+  }
+
+  async getProject(projectId: string): Promise<Project> {
+    return this.request<Project>(`/projects/${projectId}`);
+  }
+
+  async deleteProject(projectId: string): Promise<void> {
+    await this.request(`/projects/${projectId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getPromptHistory(
+    projectId: string,
+    limit: number = 20
+  ): Promise<PromptHistoryResponse> {
+    return this.request<PromptHistoryResponse>(
+      `/projects/${projectId}/history?limit=${limit}`
+    );
+  }
+
+  async uploadContextFile(
+    projectId: string,
+    file: File
+  ): Promise<{ message: string; storage_path: string; filename: string }> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const url = `${API_BASE_URL}/projects/${projectId}/upload`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: this.token ? `Bearer ${this.token}` : "",
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Upload failed: ${response.status}`);
+    }
+
+    return response.json();
+  }
+
+  // ============ Health Check ============
+
+  async healthCheck(): Promise<{
+    status: string;
+    version: string;
+    agents_available: string[];
+  }> {
+    const url = `${API_BASE_URL.replace("/api/v1", "")}/health`;
+    const response = await fetch(url);
+    return response.json();
+  }
+}
+
+// Singleton instance
+export const api = new ApiClient();
