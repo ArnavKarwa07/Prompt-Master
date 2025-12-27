@@ -62,9 +62,23 @@ export interface PromptHistoryResponse {
 
 class ApiClient {
   private token: string | null = null;
+  private tokenRefreshCallback: (() => Promise<string | null>) | null = null;
 
   setToken(token: string | null) {
     this.token = token;
+  }
+
+  setTokenRefreshCallback(callback: () => Promise<string | null>) {
+    this.tokenRefreshCallback = callback;
+  }
+
+  private async refreshToken(): Promise<string | null> {
+    if (this.tokenRefreshCallback) {
+      const newToken = await this.tokenRefreshCallback();
+      this.token = newToken;
+      return newToken;
+    }
+    return this.token;
   }
 
   private getHeaders(): HeadersInit {
@@ -79,7 +93,8 @@ class ApiClient {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    retryOnAuth: boolean = true
   ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
     const response = await fetch(url, {
@@ -89,6 +104,15 @@ class ApiClient {
         ...options.headers,
       },
     });
+
+    // Handle token expiration - refresh and retry once
+    if (response.status === 401 && retryOnAuth && this.tokenRefreshCallback) {
+      const newToken = await this.refreshToken();
+      if (newToken) {
+        // Retry the request with new token
+        return this.request<T>(endpoint, options, false);
+      }
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -153,6 +177,14 @@ class ApiClient {
   ): Promise<PromptHistoryResponse> {
     return this.request<PromptHistoryResponse>(
       `/projects/${projectId}/history?limit=${limit}`
+    );
+  }
+
+  async getGlobalPromptHistory(
+    limit: number = 10
+  ): Promise<PromptHistoryResponse> {
+    return this.request<PromptHistoryResponse>(
+      `/projects/history-global?limit=${limit}`
     );
   }
 

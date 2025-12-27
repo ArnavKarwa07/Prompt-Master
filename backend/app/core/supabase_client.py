@@ -3,14 +3,27 @@ Supabase Client Module
 Handles connection to Supabase for database and storage operations.
 """
 from supabase import create_client, Client
+import uuid
 from functools import lru_cache
 from app.core.config import get_settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @lru_cache()
 def get_supabase_client() -> Client:
     """Get cached Supabase client instance."""
     settings = get_settings()
+    
+    # Validate that required settings are present
+    if not settings.supabase_url:
+        raise ValueError("SUPABASE_URL environment variable is not set")
+    if not settings.supabase_service_key:
+        raise ValueError("SUPABASE_SERVICE_KEY environment variable is not set")
+    
+    logger.info(f"Initializing Supabase client with URL: {settings.supabase_url}")
+    
     return create_client(
         settings.supabase_url,
         settings.supabase_service_key
@@ -24,46 +37,115 @@ class SupabaseService:
         self.client = get_supabase_client()
         self.settings = get_settings()
     
+    def _db_user_id(self, clerk_user_id: str) -> str:
+        """Map Clerk user id (string) to a stable UUID v5 for DB keys."""
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"clerk:{clerk_user_id}"))
+    
     # ============ User Operations ============
     async def get_user_by_id(self, user_id: str) -> dict | None:
         """Fetch user by ID."""
-        result = self.client.table("users").select("*").eq("id", user_id).single().execute()
-        return result.data if result.data else None
+        try:
+            db_id = self._db_user_id(user_id)
+            result = (
+                self.client
+                .table("users")
+                .select("*")
+                .eq("id", db_id)
+                .single()
+                .execute()
+            )
+            return result.data if result.data else None
+        except Exception as e:
+            logger.error(f"Error fetching user {user_id}: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     async def create_user(self, user_id: str, email: str) -> dict:
         """Create a new user."""
-        result = self.client.table("users").insert({
-            "id": user_id,
-            "email": email
-        }).execute()
-        return result.data[0]
+        try:
+            db_id = self._db_user_id(user_id)
+            result = (
+                self.client
+                .table("users")
+                .insert({
+                    "id": db_id,
+                    "email": email
+                })
+                .execute()
+            )
+            return result.data[0]
+        except Exception as e:
+            logger.error(f"Error creating user {user_id}: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     # ============ Project Operations ============
     async def create_project(self, user_id: str, name: str) -> dict:
         """Create a new project for a user."""
-        result = self.client.table("projects").insert({
-            "user_id": user_id,
-            "name": name
-        }).execute()
-        return result.data[0]
+        try:
+            db_id = self._db_user_id(user_id)
+            result = (
+                self.client
+                .table("projects")
+                .insert({
+                    "user_id": db_id,
+                    "name": name
+                })
+                .execute()
+            )
+            return result.data[0]
+        except Exception as e:
+            logger.error(f"Error creating project: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     async def get_user_projects(self, user_id: str) -> list:
         """Get all projects for a user."""
-        result = self.client.table("projects").select("*").eq("user_id", user_id).execute()
-        return result.data or []
+        try:
+            db_id = self._db_user_id(user_id)
+            result = (
+                self.client
+                .table("projects")
+                .select("*")
+                .eq("user_id", db_id)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error fetching projects for user {user_id}: {str(e)}")
+            # Check if it's an API key error
+            if "Invalid API" in str(e) or "401" in str(e):
+                logger.error("Supabase API key validation failed. Check SUPABASE_SERVICE_KEY environment variable.")
+                raise ValueError("Supabase authentication failed. Please check your API keys.") from e
+            raise
     
     async def get_project(self, project_id: str) -> dict | None:
         """Get a single project by ID."""
-        result = self.client.table("projects").select("*").eq("id", project_id).single().execute()
-        return result.data if result.data else None
+        try:
+            result = self.client.table("projects").select("*").eq("id", project_id).single().execute()
+            return result.data if result.data else None
+        except Exception as e:
+            logger.error(f"Error fetching project {project_id}: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     async def delete_project(self, project_id: str) -> bool:
         """Delete a project and its associated data."""
-        # Delete prompt history first
-        self.client.table("prompt_history").delete().eq("project_id", project_id).execute()
-        # Delete project
-        self.client.table("projects").delete().eq("id", project_id).execute()
-        return True
+        try:
+            # Delete prompt history first
+            self.client.table("prompt_history").delete().eq("project_id", project_id).execute()
+            # Delete project
+            self.client.table("projects").delete().eq("id", project_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting project {project_id}: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     # ============ Prompt History Operations ============
     async def save_prompt_history(
@@ -75,26 +157,97 @@ class SupabaseService:
         optimized_prompt: str | None = None
     ) -> dict:
         """Save a prompt to history."""
-        result = self.client.table("prompt_history").insert({
-            "project_id": project_id,
-            "prompt_text": prompt_text[:1000],  # Limit text storage
-            "agent_used": agent_used,
-            "score": score,
-            "optimized_prompt": optimized_prompt[:2000] if optimized_prompt else None
-        }).execute()
-        return result.data[0]
+        try:
+            result = self.client.table("prompt_history").insert({
+                "project_id": project_id,
+                "prompt_text": prompt_text[:1000],  # Limit text storage
+                "agent_used": agent_used,
+                "score": score,
+                "optimized_prompt": optimized_prompt[:2000] if optimized_prompt else None
+            }).execute()
+            return result.data[0]
+        except Exception as e:
+            logger.error(f"Error saving prompt history: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     async def get_prompt_history(self, project_id: str, limit: int = 20) -> list:
         """Get prompt history for a project."""
-        result = (
-            self.client.table("prompt_history")
-            .select("*")
-            .eq("project_id", project_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        return result.data or []
+        try:
+            result = (
+                self.client.table("prompt_history")
+                .select("*")
+                .eq("project_id", project_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error fetching prompt history for project {project_id}: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
+
+    async def get_user_prompt_history(self, user_id: str, limit: int = 10) -> list:
+        """Get global prompt history across all projects for a user."""
+        try:
+            db_id = self._db_user_id(user_id)
+            # Inner join with projects to filter by user_id
+            result = (
+                self.client
+                .table("prompt_history")
+                .select("id,prompt_text,optimized_prompt,agent_used,score,created_at,project_id,projects!inner(user_id,name)")
+                .eq("projects.user_id", db_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error fetching global prompt history for user {user_id}: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
+
+    async def enforce_global_prompt_cap(self, user_id: str, cap: int = 10) -> int:
+        """Ensure a user has at most `cap` prompt history entries across all projects."""
+        try:
+            db_id = self._db_user_id(user_id)
+            # Fetch all IDs ordered by created_at desc, beyond cap
+            result = (
+                self.client
+                .table("prompt_history")
+                .select("id,created_at,projects!inner(user_id)")
+                .eq("projects.user_id", db_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            rows = result.data or []
+            if len(rows) <= cap:
+                return 0
+            # Determine IDs to delete (oldest beyond cap)
+            ids_to_delete = [r["id"] for r in rows[cap:]]
+            if not ids_to_delete:
+                return 0
+            del_result = (
+                self.client
+                .table("prompt_history")
+                .delete()
+                .in_("id", ids_to_delete)
+                .execute()
+            )
+            # Return count of deleted rows if available
+            try:
+                return len(del_result.data or [])
+            except Exception:
+                return len(ids_to_delete)
+        except Exception as e:
+            logger.error(f"Error enforcing global prompt cap for user {user_id}: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     # ============ Vector Operations ============
     async def store_vectors(
@@ -104,16 +257,22 @@ class SupabaseService:
         metadata: list[dict]
     ) -> list:
         """Store vectors in the knowledge_vectors table."""
-        records = []
-        for emb, summary, meta in zip(embeddings, summaries, metadata):
-            records.append({
-                "embedding": emb,
-                "chunk_summary": summary[:255],  # Enforce varchar limit
-                "metadata": meta
-            })
-        
-        result = self.client.table("knowledge_vectors").insert(records).execute()
-        return result.data
+        try:
+            records = []
+            for emb, summary, meta in zip(embeddings, summaries, metadata):
+                records.append({
+                    "embedding": emb,
+                    "chunk_summary": summary[:255],  # Enforce varchar limit
+                    "metadata": meta
+                })
+            
+            result = self.client.table("knowledge_vectors").insert(records).execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error storing vectors: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     async def search_vectors(
         self, 
@@ -122,35 +281,59 @@ class SupabaseService:
         match_count: int = 5
     ) -> list:
         """Search for similar vectors using cosine similarity."""
-        result = self.client.rpc(
-            "match_knowledge_vectors",
-            {
-                "query_embedding": query_embedding,
-                "match_threshold": match_threshold,
-                "match_count": match_count
-            }
-        ).execute()
-        return result.data or []
+        try:
+            result = self.client.rpc(
+                "match_knowledge_vectors",
+                {
+                    "query_embedding": query_embedding,
+                    "match_threshold": match_threshold,
+                    "match_count": match_count
+                }
+            ).execute()
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error searching vectors: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     # ============ Storage Operations ============
     async def upload_file(self, file_path: str, file_content: bytes, user_id: str) -> str:
         """Upload file to Supabase Storage."""
-        storage_path = f"{user_id}/{file_path}"
-        self.client.storage.from_(self.settings.storage_bucket).upload(
-            storage_path,
-            file_content,
-            {"content-type": "application/octet-stream"}
-        )
-        return storage_path
+        try:
+            storage_path = f"{self._db_user_id(user_id)}/{file_path}"
+            self.client.storage.from_(self.settings.storage_bucket).upload(
+                storage_path,
+                file_content,
+                {"content-type": "application/octet-stream"}
+            )
+            return storage_path
+        except Exception as e:
+            logger.error(f"Error uploading file: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     async def get_file_url(self, storage_path: str) -> str:
         """Get public URL for a stored file."""
-        return self.client.storage.from_(self.settings.storage_bucket).get_public_url(storage_path)
+        try:
+            return self.client.storage.from_(self.settings.storage_bucket).get_public_url(storage_path)
+        except Exception as e:
+            logger.error(f"Error getting file URL: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     async def delete_file(self, storage_path: str) -> bool:
         """Delete a file from storage."""
-        self.client.storage.from_(self.settings.storage_bucket).remove([storage_path])
-        return True
+        try:
+            self.client.storage.from_(self.settings.storage_bucket).remove([storage_path])
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting file: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
 
 
 def get_supabase_service() -> SupabaseService:

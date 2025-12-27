@@ -4,6 +4,7 @@ API endpoints for project management (authenticated users).
 """
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from typing import Optional
+import logging
 
 from app.api.models import (
     CreateProjectRequest,
@@ -14,7 +15,9 @@ from app.api.models import (
 )
 from app.core.auth import get_current_user, ClerkUser
 from app.core.supabase_client import get_supabase_service, SupabaseService
+import uuid
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -26,18 +29,31 @@ async def create_project(
     supabase: SupabaseService = Depends(get_supabase_service)
 ):
     """Create a new project."""
-    # Ensure user exists in database
-    existing_user = await supabase.get_user_by_id(user.id)
-    if not existing_user:
-        await supabase.create_user(user.id, user.email or "")
-    
-    project = await supabase.create_project(user.id, request.name)
-    
-    return ProjectResponse(
-        id=project["id"],
-        name=project["name"],
-        created_at=project.get("created_at")
-    )
+    try:
+        # Ensure user exists in database
+        existing_user = await supabase.get_user_by_id(user.id)
+        if not existing_user:
+            await supabase.create_user(user.id, user.email or "")
+        
+        project = await supabase.create_project(user.id, request.name)
+        
+        return ProjectResponse(
+            id=project["id"],
+            name=project["name"],
+            created_at=project.get("created_at")
+        )
+    except ValueError as e:
+        logger.error(f"Supabase configuration error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Database configuration error. Please check server logs."
+        )
+    except Exception as e:
+        logger.error(f"Error creating project: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create project"
+        )
 
 
 @router.get("", response_model=ProjectListResponse)
@@ -46,18 +62,31 @@ async def list_projects(
     supabase: SupabaseService = Depends(get_supabase_service)
 ):
     """List all projects for the current user."""
-    projects = await supabase.get_user_projects(user.id)
-    
-    return ProjectListResponse(
-        projects=[
-            ProjectResponse(
-                id=p["id"],
-                name=p["name"],
-                created_at=p.get("created_at")
-            )
-            for p in projects
-        ]
-    )
+    try:
+        projects = await supabase.get_user_projects(user.id)
+        
+        return ProjectListResponse(
+            projects=[
+                ProjectResponse(
+                    id=p["id"],
+                    name=p["name"],
+                    created_at=p.get("created_at")
+                )
+                for p in projects
+            ]
+        )
+    except ValueError as e:
+        logger.error(f"Supabase configuration error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Database configuration error. Please check server logs."
+        )
+    except Exception as e:
+        logger.error(f"Error listing projects for user {user.id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve projects"
+        )
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
@@ -67,19 +96,35 @@ async def get_project(
     supabase: SupabaseService = Depends(get_supabase_service)
 ):
     """Get a specific project."""
-    project = await supabase.get_project(project_id)
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    if project["user_id"] != user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    return ProjectResponse(
-        id=project["id"],
-        name=project["name"],
-        created_at=project.get("created_at")
-    )
+    try:
+        project = await supabase.get_project(project_id)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        db_user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clerk:{user.id}"))
+        if project["user_id"] != db_user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        return ProjectResponse(
+            id=project["id"],
+            name=project["name"],
+            created_at=project.get("created_at")
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Supabase configuration error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Database configuration error. Please check server logs."
+        )
+    except Exception as e:
+        logger.error(f"Error getting project {project_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve project"
+        )
 
 
 @router.delete("/{project_id}")
@@ -89,17 +134,33 @@ async def delete_project(
     supabase: SupabaseService = Depends(get_supabase_service)
 ):
     """Delete a project and all associated data."""
-    project = await supabase.get_project(project_id)
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    if project["user_id"] != user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    await supabase.delete_project(project_id)
-    
-    return {"message": "Project deleted successfully"}
+    try:
+        project = await supabase.get_project(project_id)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        db_user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clerk:{user.id}"))
+        if project["user_id"] != db_user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        await supabase.delete_project(project_id)
+        
+        return {"message": "Project deleted successfully"}
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Supabase configuration error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Database configuration error. Please check server logs."
+        )
+    except Exception as e:
+        logger.error(f"Error deleting project {project_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete project"
+        )
 
 
 @router.get("/{project_id}/history", response_model=PromptHistoryResponse)
@@ -110,29 +171,82 @@ async def get_prompt_history(
     supabase: SupabaseService = Depends(get_supabase_service)
 ):
     """Get prompt history for a project."""
-    project = await supabase.get_project(project_id)
-    
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    
-    if project["user_id"] != user.id:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    history = await supabase.get_prompt_history(project_id, limit)
-    
-    return PromptHistoryResponse(
-        history=[
-            PromptHistoryItem(
-                id=h["id"],
-                prompt_text=h["prompt_text"],
-                agent_used=h["agent_used"],
-                score=h["score"],
-                optimized_prompt=h.get("optimized_prompt"),
-                created_at=h.get("created_at")
-            )
-            for h in history
-        ]
-    )
+    try:
+        project = await supabase.get_project(project_id)
+        
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        db_user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clerk:{user.id}"))
+        if project["user_id"] != db_user_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        history = await supabase.get_prompt_history(project_id, limit)
+        
+        return PromptHistoryResponse(
+            history=[
+                PromptHistoryItem(
+                    id=h["id"],
+                    prompt_text=h["prompt_text"],
+                    agent_used=h["agent_used"],
+                    score=h["score"],
+                    optimized_prompt=h.get("optimized_prompt"),
+                    created_at=h.get("created_at")
+                )
+                for h in history
+            ]
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Supabase configuration error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Database configuration error. Please check server logs."
+        )
+    except Exception as e:
+        logger.error(f"Error getting prompt history for project {project_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve prompt history"
+        )
+
+
+@router.get("/history-global", response_model=PromptHistoryResponse)
+async def get_global_prompt_history(
+    limit: int = 10,
+    user: ClerkUser = Depends(get_current_user),
+    supabase: SupabaseService = Depends(get_supabase_service)
+):
+    """Get global prompt history across all projects for the current user."""
+    try:
+        history = await supabase.get_user_prompt_history(user.id, limit)
+
+        return PromptHistoryResponse(
+            history=[
+                PromptHistoryItem(
+                    id=h["id"],
+                    prompt_text=h["prompt_text"],
+                    agent_used=h["agent_used"],
+                    score=h["score"],
+                    optimized_prompt=h.get("optimized_prompt"),
+                    created_at=h.get("created_at")
+                )
+                for h in history
+            ]
+        )
+    except ValueError as e:
+        logger.error(f"Supabase configuration error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Database configuration error. Please check server logs."
+        )
+    except Exception as e:
+        logger.error(f"Error getting global prompt history for user {user.id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to retrieve prompt history"
+        )
 
 
 @router.post("/{project_id}/upload")
@@ -152,7 +266,9 @@ async def upload_context_file(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     
-    if project["user_id"] != user.id:
+    # Map Clerk user id to DB uuid form to compare
+    db_user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clerk:{user.id}"))
+    if project["user_id"] != db_user_id:
         raise HTTPException(status_code=403, detail="Access denied")
     
     # Read file content

@@ -4,6 +4,7 @@ API endpoints for prompt optimization.
 """
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional
+import logging
 
 from app.api.models import (
     OptimizePromptRequest,
@@ -17,6 +18,7 @@ from app.core.supabase_client import get_supabase_service, SupabaseService
 from app.graph import run_prompt_optimization
 from app.agents import AGENT_REGISTRY
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/prompts", tags=["prompts"])
 
@@ -48,7 +50,12 @@ async def optimize_prompt(
         try:
             # Verify project belongs to user
             project = await supabase.get_project(request.project_id)
-            if project and project.get("user_id") == user.id:
+            if project:
+                # Map Clerk user ID to DB UUID v5 for comparison
+                import uuid
+                db_user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clerk:{user.id}"))
+                if project.get("user_id") != db_user_id:
+                    raise Exception("Access denied: project does not belong to user")
                 await supabase.save_prompt_history(
                     project_id=request.project_id,
                     prompt_text=request.prompt,
@@ -56,9 +63,17 @@ async def optimize_prompt(
                     score=result["score"],
                     optimized_prompt=result["optimized_prompt"]
                 )
+                # Enforce global cap of 10 history entries across all projects
+                try:
+                    await supabase.enforce_global_prompt_cap(user.id, 10)
+                except Exception as cap_err:
+                    logger.warning(f"Failed to enforce global history cap: {str(cap_err)}")
+        except ValueError as e:
+            # Log API key errors but don't fail the optimization
+            logger.warning(f"Failed to save prompt history due to authentication: {str(e)}")
         except Exception as e:
-            # Don't fail the request if history save fails
-            pass
+            # Log other errors but don't fail the optimization
+            logger.warning(f"Failed to save prompt history: {str(e)}")
     
     return OptimizePromptResponse(
         original_prompt=result["prompt"],

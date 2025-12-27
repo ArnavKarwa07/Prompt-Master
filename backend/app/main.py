@@ -18,6 +18,17 @@ async def lifespan(app: FastAPI):
     print("🚀 Prompt Master API starting up...")
     print(f"📦 Loaded {len(AGENT_REGISTRY)} agents: {list(AGENT_REGISTRY.keys())}")
     
+    # Validate Supabase configuration
+    from app.core.config import get_settings
+    settings = get_settings()
+    
+    if not settings.supabase_url or not settings.supabase_service_key:
+        print("⚠️  WARNING: Supabase credentials not fully configured!")
+        print(f"  - SUPABASE_URL: {'✓' if settings.supabase_url else '✗ Missing'}")
+        print(f"  - SUPABASE_SERVICE_KEY: {'✓' if settings.supabase_service_key else '✗ Missing'}")
+    else:
+        print("✓ Supabase configuration validated")
+    
     yield
     
     # Shutdown
