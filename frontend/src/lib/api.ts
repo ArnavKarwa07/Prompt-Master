@@ -180,12 +180,15 @@ class ApiClient {
     );
   }
 
+  async getHistory(limit: number = 10): Promise<PromptHistoryResponse> {
+    return this.request<PromptHistoryResponse>(`/history?limit=${limit}`);
+  }
+
+  /** @deprecated Use getHistory() instead */
   async getGlobalPromptHistory(
     limit: number = 10
   ): Promise<PromptHistoryResponse> {
-    return this.request<PromptHistoryResponse>(
-      `/projects/history-global?limit=${limit}`
-    );
+    return this.getHistory(limit);
   }
 
   async uploadContextFile(

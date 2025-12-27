@@ -51,13 +51,18 @@ class SupabaseService:
                 .table("users")
                 .select("*")
                 .eq("id", db_id)
-                .single()
+                .limit(1)
                 .execute()
             )
-            return result.data if result.data else None
+            data = result.data or []
+            return data[0] if isinstance(data, list) and len(data) > 0 else None
         except Exception as e:
-            logger.error(f"Error fetching user {user_id}: {str(e)}")
-            if "Invalid API" in str(e) or "401" in str(e):
+            # Treat "No rows"/406 as not found rather than an error
+            msg = str(e)
+            if "406" in msg or "No rows" in msg:
+                return None
+            logger.error(f"Error fetching user {user_id}: {msg}")
+            if "Invalid API" in msg or "401" in msg:
                 raise ValueError("Supabase authentication failed. Check API keys.") from e
             raise
     
@@ -125,11 +130,22 @@ class SupabaseService:
     async def get_project(self, project_id: str) -> dict | None:
         """Get a single project by ID."""
         try:
-            result = self.client.table("projects").select("*").eq("id", project_id).single().execute()
-            return result.data if result.data else None
+            result = (
+                self.client
+                .table("projects")
+                .select("*")
+                .eq("id", project_id)
+                .limit(1)
+                .execute()
+            )
+            data = result.data or []
+            return data[0] if isinstance(data, list) and len(data) > 0 else None
         except Exception as e:
-            logger.error(f"Error fetching project {project_id}: {str(e)}")
-            if "Invalid API" in str(e) or "401" in str(e):
+            msg = str(e)
+            if "406" in msg or "No rows" in msg:
+                return None
+            logger.error(f"Error fetching project {project_id}: {msg}")
+            if "Invalid API" in msg or "401" in msg:
                 raise ValueError("Supabase authentication failed. Check API keys.") from e
             raise
     

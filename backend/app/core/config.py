@@ -8,20 +8,23 @@ from typing import Optional
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables."""
+    """Application settings loaded from environment variables.
+    All keys are optional to allow the server to start; individual services
+    will validate their required keys at runtime.
+    """
     
-    # API Keys
-    groq_api_key: str
+    # API Keys (optional; validated where used)
+    groq_api_key: Optional[str] = None
     
-    # Supabase
-    supabase_url: str
-    supabase_anon_key: str
-    supabase_service_key: str
+    # Supabase (service role used server-side)
+    supabase_url: Optional[str] = None
+    supabase_anon_key: Optional[str] = None
+    supabase_service_key: Optional[str] = None
     
-    # Clerk Auth
-    clerk_secret_key: str
-    clerk_publishable_key: str
-    clerk_jwks_url: str
+    # Clerk Auth (validated only on protected routes)
+    clerk_secret_key: Optional[str] = None
+    clerk_publishable_key: Optional[str] = None
+    clerk_jwks_url: Optional[str] = None
     
     # Server
     host: str = "0.0.0.0"

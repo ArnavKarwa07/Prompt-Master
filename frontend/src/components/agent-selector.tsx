@@ -27,7 +27,7 @@ const agents: AgentOption[] = [
     label: "Coding",
     icon: Code2,
     color: "from-blue-500 to-cyan-500",
-    description: "Code & Development",
+    description: "Code & Develop",
   },
   {
     value: "creative",

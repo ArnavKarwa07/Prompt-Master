@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.api import prompts_router, projects_router
+from app.api import prompts_router, projects_router, history_router
 from app.api.models import HealthResponse
 from app.agents import AGENT_REGISTRY
 
@@ -59,6 +59,7 @@ app.add_middleware(
 # Include routers
 app.include_router(prompts_router, prefix="/api/v1")
 app.include_router(projects_router, prefix="/api/v1")
+app.include_router(history_router, prefix="/api/v1")
 
 
 @app.get("/", tags=["root"])

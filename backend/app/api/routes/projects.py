@@ -89,6 +89,8 @@ async def list_projects(
         )
 
 
+# ============ Dynamic routes with {project_id} ============
+
 @router.get("/{project_id}", response_model=ProjectResponse)
 async def get_project(
     project_id: str,
@@ -206,43 +208,6 @@ async def get_prompt_history(
         )
     except Exception as e:
         logger.error(f"Error getting prompt history for project {project_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to retrieve prompt history"
-        )
-
-
-@router.get("/history-global", response_model=PromptHistoryResponse)
-async def get_global_prompt_history(
-    limit: int = 10,
-    user: ClerkUser = Depends(get_current_user),
-    supabase: SupabaseService = Depends(get_supabase_service)
-):
-    """Get global prompt history across all projects for the current user."""
-    try:
-        history = await supabase.get_user_prompt_history(user.id, limit)
-
-        return PromptHistoryResponse(
-            history=[
-                PromptHistoryItem(
-                    id=h["id"],
-                    prompt_text=h["prompt_text"],
-                    agent_used=h["agent_used"],
-                    score=h["score"],
-                    optimized_prompt=h.get("optimized_prompt"),
-                    created_at=h.get("created_at")
-                )
-                for h in history
-            ]
-        )
-    except ValueError as e:
-        logger.error(f"Supabase configuration error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail="Database configuration error. Please check server logs."
-        )
-    except Exception as e:
-        logger.error(f"Error getting global prompt history for user {user.id}: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail="Failed to retrieve prompt history"

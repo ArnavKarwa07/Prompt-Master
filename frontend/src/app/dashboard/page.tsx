@@ -116,7 +116,7 @@ export default function DashboardPage() {
 
       setIsLoadingHistory(true);
       try {
-        const response = await api.getGlobalPromptHistory(historyLimit);
+        const response = await api.getHistory(historyLimit);
         setHistory(response.history);
       } catch (error) {
         console.error("Failed to load history:", error);
@@ -395,6 +395,16 @@ export default function DashboardPage() {
                             : "Select a project in the Projects tab to save your work"}
                         </p>
                       </div>
+                      {selectedProject && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs text-muted-foreground hover:text-foreground"
+                          onClick={() => setSelectedProject(null)}
+                        >
+                          Clear
+                        </Button>
+                      )}
                     </div>
 
                     {/* File Upload Button - Only when project selected */}
@@ -484,11 +494,9 @@ export default function DashboardPage() {
                 <PromptOptimizer
                   projectId={selectedProject?.id}
                   onResult={() => {
-                    api
-                      .getGlobalPromptHistory(historyLimit)
-                      .then((response) => {
-                        setHistory(response.history);
-                      });
+                    api.getHistory(historyLimit).then((response) => {
+                      setHistory(response.history);
+                    });
                   }}
                 />
               </TabsContent>
@@ -548,7 +556,11 @@ export default function DashboardPage() {
                         key={project.id}
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        onClick={() => setSelectedProject(project)}
+                        onClick={() =>
+                          setSelectedProject(
+                            selectedProject?.id === project.id ? null : project
+                          )
+                        }
                         className={`glass-strong rounded-xl p-4 sm:p-6 cursor-pointer transition-all group ${
                           selectedProject?.id === project.id
                             ? "ring-2 ring-primary shadow-lg shadow-primary/20"
@@ -582,7 +594,7 @@ export default function DashboardPage() {
                         </p>
                         {selectedProject?.id === project.id && (
                           <Badge className="mt-2 text-xs" variant="secondary">
-                            Selected
+                            Selected (click to deselect)
                           </Badge>
                         )}
                       </motion.div>
