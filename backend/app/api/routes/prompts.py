@@ -24,6 +24,7 @@ router = APIRouter(prefix="/prompts", tags=["prompts"])
 
 
 @router.post("/optimize", response_model=OptimizePromptResponse)
+# @limiter.limit("10/minute")  # Uncomment to enable rate limiting
 async def optimize_prompt(
     request: OptimizePromptRequest,
     user: Optional[ClerkUser] = Depends(get_optional_user),
@@ -33,8 +34,10 @@ async def optimize_prompt(
     Optimize a prompt using the multi-agent system.
     
     - **Guest Mode**: No authentication required, results not saved
-    - **User Mode**: Optionally save to project history
+    - **User Mode**: Always save to history (with optional project association)
     """
+    print(f"[OPTIMIZE] user: {user.id if user else 'guest'}, project_id: {request.project_id}")
+    
     # Run the optimization workflow
     result = await run_prompt_optimization(
         prompt=request.prompt,
@@ -45,35 +48,49 @@ async def optimize_prompt(
         project_id=request.project_id
     )
     
-    # If authenticated and project_id provided, save to history
-    if user and request.project_id and not result.get("error"):
+    # If authenticated, ALWAYS save to history (project_id is optional)
+    if user and not result.get("error"):
+        print(f"[OPTIMIZE] Saving prompt to history for user {user.id}")
         try:
-            # Verify project belongs to user
-            project = await supabase.get_project(request.project_id)
-            if project:
-                # Map Clerk user ID to DB UUID v5 for comparison
-                import uuid
-                db_user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clerk:{user.id}"))
-                if project.get("user_id") != db_user_id:
-                    raise Exception("Access denied: project does not belong to user")
-                await supabase.save_prompt_history(
-                    project_id=request.project_id,
-                    prompt_text=request.prompt,
-                    agent_used=result["agent"],
-                    score=result["score"],
-                    optimized_prompt=result["optimized_prompt"]
-                )
-                # Enforce global cap of 10 history entries across all projects
-                try:
-                    await supabase.enforce_global_prompt_cap(user.id, 10)
-                except Exception as cap_err:
-                    logger.warning(f"Failed to enforce global history cap: {str(cap_err)}")
+            # If project_id provided, verify it belongs to user
+            project_name = None
+            if request.project_id:
+                project = await supabase.get_project(request.project_id)
+                if project:
+                    import uuid
+                    db_user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clerk:{user.id}"))
+                    if project.get("user_id") != db_user_id:
+                        print(f"[OPTIMIZE] Project doesn't belong to user, saving without project")
+                        request.project_id = None
+                    else:
+                        project_name = project.get("name")
+                else:
+                    print(f"[OPTIMIZE] Project not found, saving without project")
+                    request.project_id = None
+            
+            # Save to history (project_id can be None)
+            await supabase.save_prompt_history_v2(
+                user_id=user.id,
+                prompt_text=request.prompt,
+                agent_used=result["agent"],
+                score=result["score"],
+                optimized_prompt=result["optimized_prompt"],
+                project_id=request.project_id,
+                project_name=project_name
+            )
+            print(f"[OPTIMIZE] Successfully saved prompt to history")
+            
+            # Enforce global cap of 10 history entries
+            try:
+                await supabase.enforce_global_prompt_cap_v2(user.id, 10)
+            except Exception as cap_err:
+                print(f"[OPTIMIZE] Failed to enforce global history cap: {str(cap_err)}")
         except ValueError as e:
-            # Log API key errors but don't fail the optimization
-            logger.warning(f"Failed to save prompt history due to authentication: {str(e)}")
+            print(f"[OPTIMIZE] Failed to save prompt history due to authentication: {str(e)}")
         except Exception as e:
-            # Log other errors but don't fail the optimization
-            logger.warning(f"Failed to save prompt history: {str(e)}")
+            print(f"[OPTIMIZE] Failed to save prompt history: {str(e)}")
+    else:
+        print(f"[OPTIMIZE] Not saving to history - user: {user is not None}, error: {result.get('error')}")
     
     return OptimizePromptResponse(
         original_prompt=result["prompt"],

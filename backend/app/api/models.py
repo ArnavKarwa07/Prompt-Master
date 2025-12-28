@@ -69,6 +69,7 @@ class PromptHistoryItem(BaseModel):
     score: int
     optimized_prompt: Optional[str] = None
     created_at: Optional[datetime] = None
+    project_name: Optional[str] = None  # Name of project if associated
 
 
 class PromptHistoryResponse(BaseModel):

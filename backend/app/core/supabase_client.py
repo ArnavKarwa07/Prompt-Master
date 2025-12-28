@@ -264,6 +264,110 @@ class SupabaseService:
             if "Invalid API" in str(e) or "401" in str(e):
                 raise ValueError("Supabase authentication failed. Check API keys.") from e
             raise
+
+    # ============ V2 History Operations (user_id based) ============
+    async def save_prompt_history_v2(
+        self, 
+        user_id: str,
+        prompt_text: str, 
+        agent_used: str, 
+        score: int,
+        optimized_prompt: str | None = None,
+        project_id: str | None = None,
+        project_name: str | None = None
+    ) -> dict:
+        """Save a prompt to history with user_id (project_id optional)."""
+        try:
+            db_user_id = self._db_user_id(user_id)
+            
+            # Ensure user exists
+            existing_user = await self.get_user_by_id(user_id)
+            if not existing_user:
+                await self.create_user(user_id, "")
+            
+            record = {
+                "user_id": db_user_id,
+                "prompt_text": prompt_text[:1000],
+                "agent_used": agent_used,
+                "score": score,
+                "optimized_prompt": optimized_prompt[:2000] if optimized_prompt else None,
+            }
+            if project_id:
+                record["project_id"] = project_id
+                
+            result = self.client.table("prompt_history").insert(record).execute()
+            return result.data[0]
+        except Exception as e:
+            logger.error(f"Error saving prompt history v2: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
+
+    async def get_user_prompt_history_v2(self, user_id: str, limit: int = 10) -> list:
+        """Get prompt history for a user directly via user_id column."""
+        try:
+            db_id = self._db_user_id(user_id)
+            # Query with optional project join to get project name
+            result = (
+                self.client
+                .table("prompt_history")
+                .select("id,prompt_text,optimized_prompt,agent_used,score,created_at,project_id,projects(name)")
+                .eq("user_id", db_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            # Flatten project name (extract from nested 'projects' object)
+            data = result.data or []
+            for item in data:
+                if item.get("projects"):
+                    item["project_name"] = item["projects"].get("name")
+                else:
+                    item["project_name"] = None
+                # Remove the nested 'projects' key to flatten the response
+                if "projects" in item:
+                    del item["projects"]
+            return data
+        except Exception as e:
+            logger.error(f"Error fetching prompt history v2 for user {user_id}: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
+
+    async def enforce_global_prompt_cap_v2(self, user_id: str, cap: int = 10) -> int:
+        """Ensure a user has at most `cap` prompt history entries (using user_id column)."""
+        try:
+            db_id = self._db_user_id(user_id)
+            # Fetch all IDs ordered by created_at desc
+            result = (
+                self.client
+                .table("prompt_history")
+                .select("id,created_at")
+                .eq("user_id", db_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+            rows = result.data or []
+            if len(rows) <= cap:
+                return 0
+            # Determine IDs to delete (oldest beyond cap)
+            ids_to_delete = [r["id"] for r in rows[cap:]]
+            if not ids_to_delete:
+                return 0
+            del_result = (
+                self.client
+                .table("prompt_history")
+                .delete()
+                .in_("id", ids_to_delete)
+                .execute()
+            )
+            print(f"[SUPABASE] Deleted {len(ids_to_delete)} old history entries for user")
+            return len(ids_to_delete)
+        except Exception as e:
+            logger.error(f"Error enforcing global prompt cap v2: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
     
     # ============ Vector Operations ============
     async def store_vectors(
@@ -314,20 +418,52 @@ class SupabaseService:
             raise
     
     # ============ Storage Operations ============
+    async def ensure_bucket_exists(self) -> bool:
+        """Ensure the storage bucket exists, create if not."""
+        try:
+            buckets = self.client.storage.list_buckets()
+            bucket_names = [b.name for b in buckets]
+            
+            if self.settings.storage_bucket not in bucket_names:
+                print(f"[STORAGE] Creating bucket: {self.settings.storage_bucket}")
+                self.client.storage.create_bucket(
+                    self.settings.storage_bucket,
+                    options={"public": False}
+                )
+                print(f"[STORAGE] Bucket created successfully")
+            return True
+        except Exception as e:
+            print(f"[STORAGE] Error ensuring bucket exists: {str(e)}")
+            return False
+    
     async def upload_file(self, file_path: str, file_content: bytes, user_id: str) -> str:
         """Upload file to Supabase Storage."""
         try:
+            # Ensure bucket exists
+            await self.ensure_bucket_exists()
+            
             storage_path = f"{self._db_user_id(user_id)}/{file_path}"
+            print(f"[STORAGE] Uploading to: {storage_path}")
+            
             self.client.storage.from_(self.settings.storage_bucket).upload(
                 storage_path,
                 file_content,
-                {"content-type": "application/octet-stream"}
+                {"content-type": "application/octet-stream", "upsert": "true"}
             )
+            print(f"[STORAGE] Upload successful: {storage_path}")
             return storage_path
         except Exception as e:
-            logger.error(f"Error uploading file: {str(e)}")
-            if "Invalid API" in str(e) or "401" in str(e):
+            error_msg = str(e)
+            print(f"[STORAGE] Error uploading file: {error_msg}")
+            
+            # Handle specific errors
+            if "Bucket not found" in error_msg:
+                raise ValueError("Storage bucket not configured. Please create the bucket in Supabase Dashboard.") from e
+            if "Invalid API" in error_msg or "401" in error_msg:
                 raise ValueError("Supabase authentication failed. Check API keys.") from e
+            if "Duplicate" in error_msg or "already exists" in error_msg.lower():
+                # File already exists, return path anyway
+                return f"{self._db_user_id(user_id)}/{file_path}"
             raise
     
     async def get_file_url(self, storage_path: str) -> str:
@@ -347,6 +483,88 @@ class SupabaseService:
             return True
         except Exception as e:
             logger.error(f"Error deleting file: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
+
+    # ============ User Context Vector Operations ============
+    async def store_user_context_vectors(
+        self, 
+        user_id: str,
+        project_id: str | None,
+        embeddings: list[list[float]], 
+        texts: list[str],
+        file_name: str,
+        metadata: list[dict] | None = None
+    ) -> list:
+        """Store context vectors for a user/project."""
+        try:
+            db_user_id = self._db_user_id(user_id)
+            records = []
+            for i, (emb, text) in enumerate(zip(embeddings, texts)):
+                record = {
+                    "user_id": db_user_id,
+                    "embedding": emb,
+                    "content_text": text[:5000],  # Limit text size
+                    "file_name": file_name,
+                    "metadata": metadata[i] if metadata else {}
+                }
+                if project_id:
+                    record["project_id"] = project_id
+                records.append(record)
+            
+            result = self.client.table("user_context_vectors").insert(records).execute()
+            print(f"[VECTORS] Stored {len(records)} context vectors for user")
+            return result.data or []
+        except Exception as e:
+            logger.error(f"Error storing user context vectors: {str(e)}")
+            if "Invalid API" in str(e) or "401" in str(e):
+                raise ValueError("Supabase authentication failed. Check API keys.") from e
+            raise
+
+    async def search_user_context(
+        self,
+        user_id: str,
+        query_embedding: list[float],
+        project_id: str | None = None,
+        match_threshold: float = 0.7,
+        match_count: int = 5
+    ) -> list:
+        """Search context vectors for a user (optionally filtered by project)."""
+        try:
+            db_user_id = self._db_user_id(user_id)
+            # Use raw SQL for vector similarity search with user filter
+            # Note: This requires the match_user_context_vectors function to be created
+            params = {
+                "query_embedding": query_embedding,
+                "p_user_id": db_user_id,
+                "match_threshold": match_threshold,
+                "match_count": match_count
+            }
+            if project_id:
+                params["p_project_id"] = project_id
+            
+            result = self.client.rpc(
+                "match_user_context_vectors",
+                params
+            ).execute()
+            return result.data or []
+        except Exception as e:
+            # If function doesn't exist, fall back to basic query
+            logger.warning(f"Vector search function not available: {str(e)}")
+            return []
+
+    async def delete_user_context_vectors(self, user_id: str, project_id: str | None = None) -> int:
+        """Delete context vectors for a user (optionally for specific project)."""
+        try:
+            db_user_id = self._db_user_id(user_id)
+            query = self.client.table("user_context_vectors").delete().eq("user_id", db_user_id)
+            if project_id:
+                query = query.eq("project_id", project_id)
+            result = query.execute()
+            return len(result.data or [])
+        except Exception as e:
+            logger.error(f"Error deleting user context vectors: {str(e)}")
             if "Invalid API" in str(e) or "401" in str(e):
                 raise ValueError("Supabase authentication failed. Check API keys.") from e
             raise

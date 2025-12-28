@@ -54,6 +54,7 @@ export interface PromptHistoryItem {
   score: number;
   optimized_prompt?: string;
   created_at?: string;
+  project_name?: string; // Name of project if associated
 }
 
 export interface PromptHistoryResponse {
@@ -97,6 +98,10 @@ class ApiClient {
     retryOnAuth: boolean = true
   ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
+    console.log(`[API] ${options.method || "GET"} ${endpoint}`, {
+      hasToken: !!this.token,
+    });
+
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -105,10 +110,14 @@ class ApiClient {
       },
     });
 
+    console.log(`[API] Response ${endpoint}: ${response.status}`);
+
     // Handle token expiration - refresh and retry once
     if (response.status === 401 && retryOnAuth && this.tokenRefreshCallback) {
+      console.log(`[API] 401 received, refreshing token...`);
       const newToken = await this.refreshToken();
       if (newToken) {
+        console.log(`[API] Token refreshed, retrying request`);
         // Retry the request with new token
         return this.request<T>(endpoint, options, false);
       }
@@ -116,10 +125,13 @@ class ApiClient {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
+      console.error(`[API] Error ${endpoint}:`, error);
       throw new Error(error.detail || `API Error: ${response.status}`);
     }
 
-    return response.json();
+    const data = await response.json();
+    console.log(`[API] Success ${endpoint}:`, data);
+    return data;
   }
 
   // ============ Prompt Endpoints ============

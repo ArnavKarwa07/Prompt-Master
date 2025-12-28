@@ -170,7 +170,7 @@ export function ResultPanel({ result, className }: ResultPanelProps) {
             className="px-3 sm:px-4 pb-3 sm:pb-4"
           >
             <p className="text-xs sm:text-sm leading-relaxed text-muted-foreground">
-              {result.feedback}
+              {result.feedback || "All good but here's a better version!"}
             </p>
           </motion.div>
         )}

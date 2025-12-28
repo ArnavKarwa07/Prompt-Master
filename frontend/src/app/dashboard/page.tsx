@@ -12,6 +12,7 @@ import {
   Zap,
   Award,
   Upload as UploadIcon,
+  X,
 } from "lucide-react";
 import { Header } from "@/components/header";
 import { PromptOptimizer } from "@/components/prompt-optimizer";
@@ -108,26 +109,68 @@ export default function DashboardPage() {
 
   // Load global history for user with limit
   useEffect(() => {
-    async function loadGlobalHistory() {
+    async function loadGlobalHistory(retryCount = 0) {
       if (!user) {
+        console.log("[Dashboard] No user, clearing history");
         setHistory([]);
         return;
       }
 
+      console.log(
+        `[Dashboard] Loading history for user ${user.id}, limit=${historyLimit}, retry=${retryCount}`
+      );
       setIsLoadingHistory(true);
       try {
+        // Add delay to handle JWT timing issues - increase on retries
+        await new Promise((resolve) =>
+          setTimeout(resolve, 1000 + retryCount * 1000)
+        );
+
+        // Ensure token is set before making API call
+        const token = await getToken();
+        console.log(
+          `[Dashboard] Got token: ${
+            token ? token.substring(0, 30) + "..." : "null"
+          }`
+        );
+        api.setToken(token);
+
         const response = await api.getHistory(historyLimit);
+        console.log(`[Dashboard] History response:`, response);
         setHistory(response.history);
       } catch (error) {
-        console.error("Failed to load history:", error);
-        toast.error("Failed to load history");
+        console.error("[Dashboard] Failed to load history:", error);
+
+        // Retry on token timing errors (up to 2 retries)
+        if (
+          error instanceof Error &&
+          (error.message.includes("iat") ||
+            error.message.includes("token") ||
+            error.message.includes("401")) &&
+          retryCount < 2
+        ) {
+          console.log(
+            `Retrying loadGlobalHistory... attempt ${retryCount + 2}`
+          );
+          return loadGlobalHistory(retryCount + 1);
+        }
+
+        // Only show error for non-auth errors after retries exhausted
+        if (
+          error instanceof Error &&
+          !error.message.includes("Authentication") &&
+          !error.message.includes("token") &&
+          !error.message.includes("iat")
+        ) {
+          toast.error("Failed to load history");
+        }
       } finally {
         setIsLoadingHistory(false);
       }
     }
 
     loadGlobalHistory();
-  }, [user, historyLimit]);
+  }, [user, historyLimit, getToken]);
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
@@ -395,16 +438,6 @@ export default function DashboardPage() {
                             : "Select a project in the Projects tab to save your work"}
                         </p>
                       </div>
-                      {selectedProject && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-xs text-muted-foreground hover:text-foreground"
-                          onClick={() => setSelectedProject(null)}
-                        >
-                          Clear
-                        </Button>
-                      )}
                     </div>
 
                     {/* File Upload Button - Only when project selected */}
@@ -453,6 +486,15 @@ export default function DashboardPage() {
                           </span>
                           <span className="xs:hidden">Add Files</span>
                         </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-white/5"
+                          onClick={() => setSelectedProject(null)}
+                          title="Clear project selection"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
                         {uploadedFiles.length > 0 && (
                           <Badge variant="secondary" className="text-xs">
                             {uploadedFiles.length} file
@@ -493,10 +535,25 @@ export default function DashboardPage() {
 
                 <PromptOptimizer
                   projectId={selectedProject?.id}
-                  onResult={() => {
-                    api.getHistory(historyLimit).then((response) => {
-                      setHistory(response.history);
-                    });
+                  onResult={async () => {
+                    console.log(
+                      "[Dashboard] onResult - refreshing history, projectId:",
+                      selectedProject?.id
+                    );
+                    // Ensure token is fresh before fetching history
+                    const token = await getToken();
+                    console.log(
+                      `[Dashboard] onResult got token: ${
+                        token ? token.substring(0, 30) + "..." : "null"
+                      }`
+                    );
+                    api.setToken(token);
+                    const response = await api.getHistory(historyLimit);
+                    console.log(
+                      "[Dashboard] onResult history response:",
+                      response
+                    );
+                    setHistory(response.history);
                   }}
                 />
               </TabsContent>
@@ -646,9 +703,19 @@ export default function DashboardPage() {
                               {item.score}
                             </div>
                             <div>
-                              <Badge className="mb-1 capitalize text-xs">
-                                {item.agent_used}
-                              </Badge>
+                              <div className="flex items-center gap-2 mb-1">
+                                <Badge className="capitalize text-xs">
+                                  {item.agent_used}
+                                </Badge>
+                                {item.project_name && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs border-purple-500/30 text-purple-400"
+                                  >
+                                    {item.project_name}
+                                  </Badge>
+                                )}
+                              </div>
                               <p className="text-xs text-muted-foreground">
                                 {item.created_at
                                   ? new Date(item.created_at).toLocaleString()
@@ -657,8 +724,8 @@ export default function DashboardPage() {
                             </div>
                           </div>
                         </div>
-                        <p className="text-xs sm:text-sm leading-relaxed line-clamp-3 text-muted-foreground">
-                          {item.prompt_text}
+                        <p className="text-xs sm:text-sm leading-relaxed line-clamp-3">
+                          {item.optimized_prompt || item.prompt_text}
                         </p>
                       </motion.div>
                     ))}

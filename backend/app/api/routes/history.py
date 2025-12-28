@@ -3,6 +3,7 @@ History Routes
 API endpoints for prompt history (authenticated users).
 """
 from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
 import logging
 
 from app.api.models import (
@@ -24,12 +25,15 @@ async def get_user_history(
     supabase: SupabaseService = Depends(get_supabase_service)
 ):
     """
-    Get prompt history for the current user across all projects.
+    Get prompt history for the current user.
     
     Returns the most recent prompts optimized by this user, ordered by date.
+    Includes project name if the prompt was associated with a project.
     """
     try:
-        history = await supabase.get_user_prompt_history(user.id, limit)
+        print(f"[HISTORY] Fetching history for user {user.id} with limit {limit}")
+        history = await supabase.get_user_prompt_history_v2(user.id, limit)
+        print(f"[HISTORY] Found {len(history)} history items for user {user.id}")
 
         return PromptHistoryResponse(
             history=[
@@ -39,7 +43,8 @@ async def get_user_history(
                     agent_used=h["agent_used"],
                     score=h["score"],
                     optimized_prompt=h.get("optimized_prompt"),
-                    created_at=h.get("created_at")
+                    created_at=h.get("created_at"),
+                    project_name=h.get("project_name")
                 )
                 for h in history
             ]
