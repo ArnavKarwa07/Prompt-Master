@@ -107,17 +107,20 @@ export default function DashboardPage() {
     }
   }, [user, isLoaded, getToken]);
 
-  // Load global history for user with limit
+  // Load history for user with limit - filtered by project when selected
   useEffect(() => {
-    async function loadGlobalHistory(retryCount = 0) {
+    async function loadHistory(retryCount = 0) {
       if (!user) {
         console.log("[Dashboard] No user, clearing history");
         setHistory([]);
         return;
       }
 
+      const scope = selectedProject
+        ? `project ${selectedProject.id}`
+        : "global";
       console.log(
-        `[Dashboard] Loading history for user ${user.id}, limit=${historyLimit}, retry=${retryCount}`
+        `[Dashboard] Loading ${scope} history for user ${user.id}, limit=${historyLimit}, retry=${retryCount}`
       );
       setIsLoadingHistory(true);
       try {
@@ -135,7 +138,11 @@ export default function DashboardPage() {
         );
         api.setToken(token);
 
-        const response = await api.getHistory(historyLimit);
+        // Pass project ID if a project is selected, otherwise get global history
+        const response = await api.getHistory(
+          historyLimit,
+          selectedProject?.id
+        );
         console.log(`[Dashboard] History response:`, response);
         setHistory(response.history);
       } catch (error) {
@@ -149,10 +156,8 @@ export default function DashboardPage() {
             error.message.includes("401")) &&
           retryCount < 2
         ) {
-          console.log(
-            `Retrying loadGlobalHistory... attempt ${retryCount + 2}`
-          );
-          return loadGlobalHistory(retryCount + 1);
+          console.log(`Retrying loadHistory... attempt ${retryCount + 2}`);
+          return loadHistory(retryCount + 1);
         }
 
         // Only show error for non-auth errors after retries exhausted
@@ -169,8 +174,8 @@ export default function DashboardPage() {
       }
     }
 
-    loadGlobalHistory();
-  }, [user, historyLimit, getToken]);
+    loadHistory();
+  }, [user, historyLimit, getToken, selectedProject]);
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim()) return;
@@ -266,7 +271,7 @@ export default function DashboardPage() {
   const favoriteAgent =
     Object.keys(mostUsedAgent).length > 0
       ? Object.entries(mostUsedAgent).sort((a, b) => b[1] - a[1])[0][0]
-      : "None";
+      : "N/A";
 
   if (!isLoaded) {
     return (
@@ -326,13 +331,19 @@ export default function DashboardPage() {
               </p>
             </motion.div>
 
-            {/* Stats Cards */}
-            {selectedProject && history.length > 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8"
-              >
+            {/* Stats Cards - Show global or project-specific metrics */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-2 mb-6 sm:mb-8"
+            >
+              {/* Metrics scope indicator */}
+              {/* <p className="text-xs text-muted-foreground">
+                {selectedProject
+                    ? `📊 Stats for: ${selectedProject.name}`
+                    : "📊 Global Stats (all projects)"}
+                </p> */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 <div className="glass-strong rounded-xl p-4 sm:p-6">
                   <div className="flex items-center gap-3">
                     <div className="p-2 sm:p-3 rounded-lg bg-blue-500/20">
@@ -380,8 +391,8 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
-              </motion.div>
-            )}
+              </div>
+            </motion.div>
 
             {/* Main Content */}
             <Tabs defaultValue="optimize" className="space-y-4 sm:space-y-6">

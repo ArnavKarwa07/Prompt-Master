@@ -303,16 +303,29 @@ class SupabaseService:
                 raise ValueError("Supabase authentication failed. Check API keys.") from e
             raise
 
-    async def get_user_prompt_history_v2(self, user_id: str, limit: int = 10) -> list:
-        """Get prompt history for a user directly via user_id column."""
+    async def get_user_prompt_history_v2(self, user_id: str, limit: int = 10, project_id: str | None = None) -> list:
+        """Get prompt history for a user directly via user_id column.
+        
+        Args:
+            user_id: The Clerk user ID
+            limit: Maximum number of records to return
+            project_id: Optional project ID to filter by. If None, returns all user's history.
+        """
         try:
             db_id = self._db_user_id(user_id)
             # Query with optional project join to get project name
-            result = (
+            query = (
                 self.client
                 .table("prompt_history")
                 .select("id,prompt_text,optimized_prompt,agent_used,score,created_at,project_id,projects(name)")
                 .eq("user_id", db_id)
+            )
+            # Filter by project_id if provided
+            if project_id:
+                query = query.eq("project_id", project_id)
+            
+            result = (
+                query
                 .order("created_at", desc=True)
                 .limit(limit)
                 .execute()

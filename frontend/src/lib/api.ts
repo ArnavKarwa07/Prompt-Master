@@ -192,8 +192,15 @@ class ApiClient {
     );
   }
 
-  async getHistory(limit: number = 10): Promise<PromptHistoryResponse> {
-    return this.request<PromptHistoryResponse>(`/history?limit=${limit}`);
+  async getHistory(
+    limit: number = 10,
+    projectId?: string | null
+  ): Promise<PromptHistoryResponse> {
+    let url = `/history?limit=${limit}`;
+    if (projectId) {
+      url += `&project_id=${projectId}`;
+    }
+    return this.request<PromptHistoryResponse>(url);
   }
 
   /** @deprecated Use getHistory() instead */
