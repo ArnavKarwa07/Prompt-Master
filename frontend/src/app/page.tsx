@@ -3,6 +3,7 @@
 import { Header } from "@/components/header";
 import { PromptOptimizer } from "@/components/prompt-optimizer";
 import { GlobalLoading } from "@/components/global-loading";
+import { Footer } from "@/components/footer";
 import Link from "next/dist/client/link";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
@@ -209,32 +210,7 @@ export default function Home() {
             </section>
 
             {/* Minimal Footer */}
-            <footer className="border-t border-white/10 mt-10">
-              <div className="page-center">
-                <div className="page-inner px-4 md:px-6 py-10">
-                  <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-primary rounded-full" />
-                      <p>© 2025 Prompt Master. Built with LangGraph.</p>
-                    </div>
-                    <div className="flex gap-8">
-                      <Link
-                        href="/dashboard"
-                        className="hover:text-primary transition-colors font-medium"
-                      >
-                        Dashboard
-                      </Link>
-                      <Link
-                        href="/sign-up"
-                        className="hover:text-primary transition-colors font-medium"
-                      >
-                        Sign Up
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </footer>
+            <Footer />
           </div>
         </div>
       </main>

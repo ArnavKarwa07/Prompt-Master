@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useUser, useAuth } from "@clerk/nextjs";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import {
   Plus,
@@ -17,7 +18,7 @@ import {
 import { Header } from "@/components/header";
 import { PromptOptimizer } from "@/components/prompt-optimizer";
 import { GlobalLoading } from "@/components/global-loading";
-// import { FileUpload } from "@/components/file-upload";
+import { Footer } from "@/components/footer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -729,6 +730,9 @@ export default function DashboardPage() {
             </Tabs>
           </div>
         </div>
+
+        {/* Minimal Footer */}
+        <Footer />
       </main>
     </div>
   );
