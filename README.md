@@ -288,5 +288,3 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 MIT License - see [LICENSE](LICENSE) for details.
 
 ---
-
-Built with ❤️ using LangGraph, Groq, Next.js, and Supabase

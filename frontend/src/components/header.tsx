@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { SignInButton, SignUpButton, UserButton, useUser } from "@clerk/nextjs";
-import { Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 export function Header() {
@@ -13,15 +13,17 @@ export function Header() {
       <div className="flex h-14 sm:h-16 w-full items-center justify-between gap-4">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-1.5 sm:gap-2 group">
-          <div className="relative">
-            <div className="absolute inset-0 bg-linear-to-r from-purple-500 to-pink-500 blur-lg opacity-50 group-hover:opacity-75 transition-opacity" />
-            <div className="relative bg-linear-to-br from-purple-500 to-pink-500 p-1.5 sm:p-2 rounded-lg">
-              <Zap className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
-            </div>
+          <div className="relative w-8 h-8 sm:w-10 sm:h-10">
+            <Image
+              src="/favicon.ico"
+              alt="Prompt Master Logo"
+              fill
+              className="object-contain"
+              priority
+            />
           </div>
-          <span className="font-bold text-lg sm:text-xl bg-linear-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-            <span className="hidden xs:inline">Prompt Master</span>
-            <span className="xs:hidden">PM</span>
+          <span className="font-bold text-lg sm:text-xl bg-linear-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent hidden sm:inline">
+            Prompt Master
           </span>
         </Link>
 
@@ -38,7 +40,7 @@ export function Header() {
                       className="hover:bg-white/10 text-xs sm:text-sm px-2 sm:px-3"
                     >
                       <span className="hidden sm:inline">Dashboard</span>
-                      <span className="sm:hidden">Dash</span>
+                      <span className="sm:hidden">Dashboard</span>
                     </Button>
                   </Link>
                   <UserButton
