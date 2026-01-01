@@ -98,9 +98,6 @@ class ApiClient {
     retryOnAuth: boolean = true
   ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
-    console.log(`[API] ${options.method || "GET"} ${endpoint}`, {
-      hasToken: !!this.token,
-    });
 
     const response = await fetch(url, {
       ...options,
@@ -110,14 +107,10 @@ class ApiClient {
       },
     });
 
-    console.log(`[API] Response ${endpoint}: ${response.status}`);
-
     // Handle token expiration - refresh and retry once
     if (response.status === 401 && retryOnAuth && this.tokenRefreshCallback) {
-      console.log(`[API] 401 received, refreshing token...`);
       const newToken = await this.refreshToken();
       if (newToken) {
-        console.log(`[API] Token refreshed, retrying request`);
         // Retry the request with new token
         return this.request<T>(endpoint, options, false);
       }
@@ -130,7 +123,6 @@ class ApiClient {
     }
 
     const data = await response.json();
-    console.log(`[API] Success ${endpoint}:`, data);
     return data;
   }
 

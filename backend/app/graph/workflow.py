@@ -9,6 +9,7 @@ from operator import add
 from app.agents import get_agent, AgentState, AGENT_REGISTRY
 from app.graph.supervisor import get_supervisor
 from app.graph.rag_node import get_rag_node
+from app.core.supabase_client import get_supabase_service
 
 
 class GraphState(TypedDict):
@@ -28,6 +29,7 @@ class GraphState(TypedDict):
     
     # RAG
     rag_context: Optional[str]
+    project_context: Optional[str]  # Context from project files
     
     # Output
     score: Optional[int]
@@ -65,20 +67,42 @@ async def supervisor_node(state: GraphState) -> GraphState:
 async def rag_node(state: GraphState) -> GraphState:
     """
     RAG node that fetches relevant prompt engineering context.
+    Uses knowledge base search for relevant best practices.
+    Also fetches project-specific context files if available.
     """
     if not state.get("use_rag", True):
         return state
     
     rag = get_rag_node()
+    
+    # Get the agent type for agent-specific tips
+    agent_type = state.get("selected_agent", "general")
+    
+    # Get prompt engineering knowledge base context
     context = await rag.get_relevant_context(
         state["prompt"],
         state["goal"],
+        agent_type=agent_type,
         use_database=state.get("user_id") is not None
     )
     
+    # Get project-specific file context if user and project are provided
+    project_context = ""
+    if state.get("user_id") and state.get("project_id"):
+        try:
+            supabase = get_supabase_service()
+            project_context = await supabase.get_project_context_text(
+                state["user_id"],
+                state["project_id"]
+            )
+        except Exception:
+            # Silently continue if project context fails
+            pass
+    
     return {
         **state,
-        "rag_context": context
+        "rag_context": context,
+        "project_context": project_context
     }
 
 
@@ -94,6 +118,7 @@ async def coding_agent_node(state: GraphState) -> GraphState:
         "feedback": None,
         "optimized_prompt": None,
         "rag_context": state.get("rag_context"),
+        "project_context": state.get("project_context"),
         "error": None
     }
     result = await agent.evaluate(agent_state)
@@ -119,6 +144,7 @@ async def creative_agent_node(state: GraphState) -> GraphState:
         "feedback": None,
         "optimized_prompt": None,
         "rag_context": state.get("rag_context"),
+        "project_context": state.get("project_context"),
         "error": None
     }
     result = await agent.evaluate(agent_state)
@@ -144,6 +170,7 @@ async def analyst_agent_node(state: GraphState) -> GraphState:
         "feedback": None,
         "optimized_prompt": None,
         "rag_context": state.get("rag_context"),
+        "project_context": state.get("project_context"),
         "error": None
     }
     result = await agent.evaluate(agent_state)
@@ -169,6 +196,7 @@ async def general_agent_node(state: GraphState) -> GraphState:
         "feedback": None,
         "optimized_prompt": None,
         "rag_context": state.get("rag_context"),
+        "project_context": state.get("project_context"),
         "error": None
     }
     result = await agent.evaluate(agent_state)

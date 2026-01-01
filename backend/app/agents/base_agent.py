@@ -19,6 +19,7 @@ class AgentState(TypedDict):
     feedback: Optional[str]
     optimized_prompt: Optional[str]
     rag_context: Optional[str]
+    project_context: Optional[str]  # Context from uploaded project files
     error: Optional[str]
 
 
@@ -71,12 +72,33 @@ class BaseAgent(ABC):
             "actionability": {"weight": 20, "description": "Can an LLM clearly act on this prompt?"},
         }
     
-    def build_evaluation_prompt(self, prompt: str, goal: str, context: str = "") -> str:
+    def build_evaluation_prompt(self, prompt: str, goal: str, context: str = "", project_context: str = "") -> str:
         """Build the evaluation prompt for this agent."""
         rubric_text = "\n".join([
             f"- {key} ({v['weight']} points): {v['description']}"
             for key, v in self.rubric.items()
         ])
+        
+        kb_context = ""
+        if context:
+            kb_context = f"""
+KNOWLEDGE BASE REFERENCE:
+Use the following prompt engineering best practices to inform your evaluation and optimization:
+---
+{context}
+---
+Apply these techniques when optimizing the prompt. Reference specific techniques in your feedback.
+"""
+        
+        proj_context = ""
+        if project_context:
+            proj_context = f"""
+PROJECT FILES CONTEXT:
+The user has uploaded the following files to their project. Use this context to better understand their domain and provide more relevant optimization:
+---
+{project_context}
+---
+"""
         
         return f"""
 You are evaluating a prompt for: {goal}
@@ -85,9 +107,7 @@ PROMPT TO EVALUATE:
 \"\"\"
 {prompt}
 \"\"\"
-
-{f"ADDITIONAL CONTEXT: {context}" if context else ""}
-
+{kb_context}{proj_context}
 SCORING RUBRIC (Total: 100 points):
 {rubric_text}
 
@@ -114,10 +134,11 @@ Be thorough and constructive in your feedback. The optimized prompt should be si
             prompt = state["prompt"]
             goal = state["goal"]
             context = state.get("rag_context", "")
+            project_context = state.get("project_context", "")
             
             messages = [
                 {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": self.build_evaluation_prompt(prompt, goal, context)}
+                {"role": "user", "content": self.build_evaluation_prompt(prompt, goal, context, project_context)}
             ]
             
             response = await self.llm.ainvoke(messages)

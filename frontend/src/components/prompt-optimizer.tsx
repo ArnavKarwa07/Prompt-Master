@@ -48,9 +48,7 @@ export function PromptOptimizer({ projectId, onResult }: PromptOptimizerProps) {
         project_id: projectId || null,
       };
 
-      console.log("[PromptOptimizer] Sending optimize request:", request);
       const response = await api.optimizePrompt(request);
-      console.log("[PromptOptimizer] Got response:", response);
       setResult(response);
       onResult?.(response);
       toast.success("Prompt optimized successfully!");

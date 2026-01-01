@@ -17,25 +17,22 @@ from app.agents import AGENT_REGISTRY
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown events."""
-    # Startup
-    print("🚀 Prompt Master API starting up...")
-    print(f"📦 Loaded {len(AGENT_REGISTRY)} agents: {list(AGENT_REGISTRY.keys())}")
+    # Startup - minimal logging
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Prompt Master API starting - loaded {len(AGENT_REGISTRY)} agents")
     
     # Validate Supabase configuration
     from app.core.config import get_settings
     settings = get_settings()
     
     if not settings.supabase_url or not settings.supabase_service_key:
-        print("⚠️  WARNING: Supabase credentials not fully configured!")
-        print(f"  - SUPABASE_URL: {'✓' if settings.supabase_url else '✗ Missing'}")
-        print(f"  - SUPABASE_SERVICE_KEY: {'✓' if settings.supabase_service_key else '✗ Missing'}")
-    else:
-        print("✓ Supabase configuration validated")
+        logger.warning("Supabase credentials not fully configured")
     
     yield
     
     # Shutdown
-    print("👋 Prompt Master API shutting down...")
+    logger.info("Prompt Master API shutting down")
 
 
 # Initialize rate limiter

@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 import { Header } from "@/components/header";
 import { PromptOptimizer } from "@/components/prompt-optimizer";
-import { FileUpload } from "@/components/file-upload";
+import { GlobalLoading } from "@/components/global-loading";
+// import { FileUpload } from "@/components/file-upload";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -82,7 +83,6 @@ export default function DashboardPage() {
           (error.message.includes("iat") || error.message.includes("token")) &&
           retryCount < 2
         ) {
-          console.log(`Retrying loadProjects... attempt ${retryCount + 2}`);
           return loadProjects(retryCount + 1);
         }
 
@@ -111,17 +111,10 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadHistory(retryCount = 0) {
       if (!user) {
-        console.log("[Dashboard] No user, clearing history");
         setHistory([]);
         return;
       }
 
-      const scope = selectedProject
-        ? `project ${selectedProject.id}`
-        : "global";
-      console.log(
-        `[Dashboard] Loading ${scope} history for user ${user.id}, limit=${historyLimit}, retry=${retryCount}`
-      );
       setIsLoadingHistory(true);
       try {
         // Add delay to handle JWT timing issues - increase on retries
@@ -131,11 +124,6 @@ export default function DashboardPage() {
 
         // Ensure token is set before making API call
         const token = await getToken();
-        console.log(
-          `[Dashboard] Got token: ${
-            token ? token.substring(0, 30) + "..." : "null"
-          }`
-        );
         api.setToken(token);
 
         // Pass project ID if a project is selected, otherwise get global history
@@ -143,7 +131,6 @@ export default function DashboardPage() {
           historyLimit,
           selectedProject?.id
         );
-        console.log(`[Dashboard] History response:`, response);
         setHistory(response.history);
       } catch (error) {
         console.error("[Dashboard] Failed to load history:", error);
@@ -156,7 +143,6 @@ export default function DashboardPage() {
             error.message.includes("401")) &&
           retryCount < 2
         ) {
-          console.log(`Retrying loadHistory... attempt ${retryCount + 2}`);
           return loadHistory(retryCount + 1);
         }
 
@@ -274,18 +260,7 @@ export default function DashboardPage() {
       : "N/A";
 
   if (!isLoaded) {
-    return (
-      <div className="flex min-h-screen items-center justify-center dark mesh-gradient">
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center space-y-4"
-        >
-          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-muted-foreground">Loading...</p>
-        </motion.div>
-      </div>
-    );
+    return <GlobalLoading message="Loading your dashboard" />;
   }
 
   if (!user) {
@@ -547,23 +522,10 @@ export default function DashboardPage() {
                 <PromptOptimizer
                   projectId={selectedProject?.id}
                   onResult={async () => {
-                    console.log(
-                      "[Dashboard] onResult - refreshing history, projectId:",
-                      selectedProject?.id
-                    );
                     // Ensure token is fresh before fetching history
                     const token = await getToken();
-                    console.log(
-                      `[Dashboard] onResult got token: ${
-                        token ? token.substring(0, 30) + "..." : "null"
-                      }`
-                    );
                     api.setToken(token);
                     const response = await api.getHistory(historyLimit);
-                    console.log(
-                      "[Dashboard] onResult history response:",
-                      response
-                    );
                     setHistory(response.history);
                   }}
                 />

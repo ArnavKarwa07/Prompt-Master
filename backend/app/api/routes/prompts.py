@@ -36,8 +36,6 @@ async def optimize_prompt(
     - **Guest Mode**: No authentication required, results not saved
     - **User Mode**: Always save to history (with optional project association)
     """
-    print(f"[OPTIMIZE] user: {user.id if user else 'guest'}, project_id: {request.project_id}")
-    
     # Run the optimization workflow
     result = await run_prompt_optimization(
         prompt=request.prompt,
@@ -50,7 +48,6 @@ async def optimize_prompt(
     
     # If authenticated, ALWAYS save to history (project_id is optional)
     if user and not result.get("error"):
-        print(f"[OPTIMIZE] Saving prompt to history for user {user.id}")
         try:
             # If project_id provided, verify it belongs to user
             project_name = None
@@ -60,12 +57,10 @@ async def optimize_prompt(
                     import uuid
                     db_user_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"clerk:{user.id}"))
                     if project.get("user_id") != db_user_id:
-                        print(f"[OPTIMIZE] Project doesn't belong to user, saving without project")
                         request.project_id = None
                     else:
                         project_name = project.get("name")
                 else:
-                    print(f"[OPTIMIZE] Project not found, saving without project")
                     request.project_id = None
             
             # Save to history (project_id can be None)
@@ -78,19 +73,16 @@ async def optimize_prompt(
                 project_id=request.project_id,
                 project_name=project_name
             )
-            print(f"[OPTIMIZE] Successfully saved prompt to history")
             
             # Enforce global cap of 10 history entries
             try:
                 await supabase.enforce_global_prompt_cap_v2(user.id, 10)
             except Exception as cap_err:
-                print(f"[OPTIMIZE] Failed to enforce global history cap: {str(cap_err)}")
+                logger.warning(f"Failed to enforce global history cap: {str(cap_err)}")
         except ValueError as e:
-            print(f"[OPTIMIZE] Failed to save prompt history due to authentication: {str(e)}")
+            logger.warning(f"Failed to save prompt history due to authentication: {str(e)}")
         except Exception as e:
-            print(f"[OPTIMIZE] Failed to save prompt history: {str(e)}")
-    else:
-        print(f"[OPTIMIZE] Not saving to history - user: {user is not None}, error: {result.get('error')}")
+            logger.error(f"Failed to save prompt history: {str(e)}")
     
     return OptimizePromptResponse(
         original_prompt=result["prompt"],

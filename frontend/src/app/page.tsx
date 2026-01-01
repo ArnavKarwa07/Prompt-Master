@@ -2,6 +2,7 @@
 
 import { Header } from "@/components/header";
 import { PromptOptimizer } from "@/components/prompt-optimizer";
+import { GlobalLoading } from "@/components/global-loading";
 import Link from "next/dist/client/link";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
@@ -20,7 +21,7 @@ export default function Home() {
 
   // Show loading state while checking auth
   if (!isLoaded || isSignedIn) {
-    return null;
+    return <GlobalLoading message="Initializing Prompt Master" />;
   }
 
   return (
