@@ -3,7 +3,7 @@ name: Keep Render Service Alive
 on:
   schedule:
     # Run every hour (at minute 0)
-    - cron: '0 * * * *'
+    - cron: "0 * * * *"
   workflow_dispatch: # Allow manual triggering
 
 jobs:
@@ -21,7 +21,19 @@ jobs:
             echo "⚠ Service returned status code $response"
             exit 1
           fi
-      
+
+      - name: Ping API Docs
+        run: |
+          echo "Pinging API docs endpoint"
+          response=$(curl -s -o /dev/null -w "%{http_code}" https://prompt-master-tbkm.onrender.com/docs)
+          echo "Response code: $response"
+          if [ $response -eq 200 ]; then
+            echo "✓ Docs are reachable"
+          else
+            echo "⚠ Docs endpoint returned status code $response"
+            exit 1
+          fi
+
       - name: Ping API Root
         run: |
           echo "Pinging API root endpoint"
