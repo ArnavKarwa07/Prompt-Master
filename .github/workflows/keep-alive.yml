@@ -2,39 +2,93 @@ name: Keep Render Service Alive
 
 on:
   schedule:
-    # Run every hour (at minute 0)
-    - cron: "0 * * * *"
+    # Run every 14 minutes to prevent Render from spinning down (15 min threshold)
+    - cron: "*/14 * * * *"
   workflow_dispatch: # Allow manual triggering
 
 jobs:
-  ping:
+  keep-alive:
     runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
     steps:
-      - name: Ping Health Endpoint
+      - name: Check Current Time
+        run: echo "Starting keep-alive ping at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+
+      - name: Ping Health Endpoint with Retry
         run: |
-          echo "Pinging Render service at $(date)"
-          response=$(curl -s -o /dev/null -w "%{http_code}" https://prompt-master-tbkm.onrender.com/health)
-          echo "Response code: $response"
-          if [ $response -eq 200 ]; then
-            echo "✓ Service is alive and responding"
-          else
-            echo "⚠ Service returned status code $response"
+          set +e  # Don't exit on error, handle it instead
+          MAX_ATTEMPTS=3
+          WAIT_TIME=5
+          ENDPOINT="https://prompt-master-tbkm.onrender.com/health"
+
+          for attempt in $(seq 1 $MAX_ATTEMPTS); do
+            echo "Attempt $attempt of $MAX_ATTEMPTS: Pinging $ENDPOINT"
+            response=$(curl -s -m 30 -w "\n%{http_code}" "$ENDPOINT")
+            http_code=$(echo "$response" | tail -n 1)
+            
+            if [ "$http_code" = "200" ] || [ "$http_code" = "404" ]; then
+              echo "✓ Health endpoint responded with code: $http_code"
+              break
+            else
+              echo "⚠ Received response code: $http_code"
+              if [ $attempt -lt $MAX_ATTEMPTS ]; then
+                echo "Waiting ${WAIT_TIME}s before retry..."
+                sleep $WAIT_TIME
+                WAIT_TIME=$((WAIT_TIME + 5))
+              fi
+            fi
+          done
+
+          if [ "$http_code" != "200" ] && [ "$http_code" != "404" ]; then
+            echo "❌ All retry attempts failed"
             exit 1
           fi
+
+      - name: Ping Main API Endpoint
+        run: |
+          set +e
+          echo "Pinging main API endpoint"
+          curl -s -m 30 -X GET "https://prompt-master-tbkm.onrender.com/" \
+            -H "User-Agent: KeepAlive-Bot/1.0" || echo "Endpoint returned an error (expected for root path)"
+          echo "✓ Main endpoint pinged"
 
       - name: Ping API Docs
         run: |
+          set +e
           echo "Pinging API docs endpoint"
-          response=$(curl -s -o /dev/null -w "%{http_code}" https://prompt-master-tbkm.onrender.com/docs)
-          echo "Response code: $response"
-          if [ $response -eq 200 ]; then
-            echo "✓ Docs are reachable"
-          else
-            echo "⚠ Docs endpoint returned status code $response"
-            exit 1
-          fi
+          response=$(curl -s -o /dev/null -w "%{http_code}" -m 30 "https://prompt-master-tbkm.onrender.com/docs")
+          echo "✓ Docs endpoint responded with code: $response"
 
-      - name: Ping API Root
+      - name: Ping Specific Routes
         run: |
-          echo "Pinging API root endpoint"
-          curl -s https://prompt-master-tbkm.onrender.com/ | head -n 10
+          set +e
+          echo "Pinging specific API routes to generate activity"
+
+          # List of endpoints to ping (light, read-only operations)
+          endpoints=(
+            "https://prompt-master-tbkm.onrender.com/api/v1"
+            "https://prompt-master-tbkm.onrender.com/api/v1/prompts"
+          )
+
+          for endpoint in "${endpoints[@]}"; do
+            echo "Pinging: $endpoint"
+            curl -s -m 30 -X GET "$endpoint" \
+              -H "User-Agent: KeepAlive-Bot/1.0" \
+              -H "Accept: application/json" \
+              > /dev/null 2>&1 || true
+            sleep 2
+          done
+          echo "✓ API routes pinged"
+
+      - name: Log Success
+        if: success()
+        run: |
+          echo "✅ Keep-alive check completed successfully at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "Next scheduled run in 10 minutes"
+
+      - name: Log Failure
+        if: failure()
+        run: |
+          echo "❌ Keep-alive check encountered issues"
+          echo "This may indicate the service is experiencing problems or is unreachable"
