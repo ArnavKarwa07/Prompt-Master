@@ -20,9 +20,9 @@ export const metadata: Metadata = {
   title: "Prompt Master - AI Prompt Optimizer",
   description: "Multi-Agent Prompt Reviewer & Optimizer",
   icons: {
-    icon: "/logo.png",
-    shortcut: "/logo.png",
-    apple: "/logo.png",
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+    apple: "/favicon.ico",
   },
 };
 
@@ -35,7 +35,7 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en" className="dark">
         <head>
-          <link rel="icon" href="/logo.png" />
+          <link rel="icon" href="/favicon.ico" />
         </head>
         <body
           className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background`}
