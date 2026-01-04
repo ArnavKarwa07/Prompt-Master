@@ -2,8 +2,12 @@ name: Keep Render Service Alive
 
 on:
   schedule:
-    # Run every 14 minutes to prevent Render from spinning down (15 min threshold)
-    - cron: "*/14 * * * *"
+    # Run every 14 minutes between 12am-12pm IST (18:30-06:30 UTC)
+    # IST is UTC+5:30, so 12am IST = 6:30pm UTC (18:30), 12pm IST = 6:30am UTC (06:30)
+    # This results in ~51 runs/day, ~1-2 min/run = ~51-102 min/day, ~1,530-3,060 min/month
+    # GitHub Actions free tier: Public repos = unlimited, Private repos = 2,000 min/month
+    - cron: "*/14 18-23 * * *" # 6:30pm-11:59pm UTC (12am-5:29am IST)
+    - cron: "*/14 0-6 * * *" # 12am-6:30am UTC (5:30am-12pm IST)
   workflow_dispatch: # Allow manual triggering
 
 jobs:
@@ -13,25 +17,55 @@ jobs:
       max-parallel: 1
     steps:
       - name: Check Current Time
-        run: echo "Starting keep-alive ping at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+        run: |
+          echo "Starting keep-alive ping at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "IST time: $(TZ='Asia/Kolkata' date +'%Y-%m-%d %H:%M:%S IST')"
 
       - name: Ping Health Endpoint with Retry
         run: |
           set +e  # Don't exit on error, handle it instead
-          MAX_ATTEMPTS=3
-          WAIT_TIME=5
+          MAX_ATTEMPTS=5
+          WAIT_TIME=10
           ENDPOINT="https://prompt-master-tbkm.onrender.com/health"
+          SUCCESS=false
 
           for attempt in $(seq 1 $MAX_ATTEMPTS); do
             echo "Attempt $attempt of $MAX_ATTEMPTS: Pinging $ENDPOINT"
-            response=$(curl -s -m 30 -w "\n%{http_code}" "$ENDPOINT")
-            http_code=$(echo "$response" | tail -n 1)
             
-            if [ "$http_code" = "200" ] || [ "$http_code" = "404" ]; then
-              echo "✓ Health endpoint responded with code: $http_code"
+            # Use curl with more robust options
+            response=$(curl -L -s -S -k \
+              --connect-timeout 30 \
+              --max-time 60 \
+              --retry 2 \
+              --retry-delay 5 \
+              -w "\n%{http_code}" \
+              -H "User-Agent: GitHub-KeepAlive-Bot/1.0" \
+              -H "Accept: application/json" \
+              "$ENDPOINT" 2>&1)
+            
+            http_code=$(echo "$response" | tail -n 1)
+            response_body=$(echo "$response" | head -n -1)
+            
+            echo "Response code: $http_code"
+            
+            if [ "$http_code" = "200" ]; then
+              echo "✓ Health endpoint responded successfully!"
+              echo "Response: $response_body"
+              SUCCESS=true
               break
+            elif [ "$http_code" = "404" ]; then
+              echo "⚠ Got 404, but service is responding"
+              SUCCESS=true
+              break
+            elif [ "$http_code" = "000" ]; then
+              echo "⚠ Connection failed (code 000) - service may be starting up"
+              if [ $attempt -lt $MAX_ATTEMPTS ]; then
+                echo "Waiting ${WAIT_TIME}s before retry (service needs time to spin up)..."
+                sleep $WAIT_TIME
+                WAIT_TIME=$((WAIT_TIME + 10))
+              fi
             else
-              echo "⚠ Received response code: $http_code"
+              echo "⚠ Received unexpected response code: $http_code"
               if [ $attempt -lt $MAX_ATTEMPTS ]; then
                 echo "Waiting ${WAIT_TIME}s before retry..."
                 sleep $WAIT_TIME
@@ -40,55 +74,40 @@ jobs:
             fi
           done
 
-          if [ "$http_code" != "200" ] && [ "$http_code" != "404" ]; then
-            echo "❌ All retry attempts failed"
+          if [ "$SUCCESS" = false ]; then
+            echo "❌ All retry attempts failed after $MAX_ATTEMPTS tries"
+            echo "Note: Render free tier services may take 50+ seconds to spin up from cold start"
             exit 1
           fi
 
-      - name: Ping Main API Endpoint
+      - name: Ping Root Endpoint
         run: |
           set +e
-          echo "Pinging main API endpoint"
-          curl -s -m 30 -X GET "https://prompt-master-tbkm.onrender.com/" \
-            -H "User-Agent: KeepAlive-Bot/1.0" || echo "Endpoint returned an error (expected for root path)"
-          echo "✓ Main endpoint pinged"
-
-      - name: Ping API Docs
-        run: |
-          set +e
-          echo "Pinging API docs endpoint"
-          response=$(curl -s -o /dev/null -w "%{http_code}" -m 30 "https://prompt-master-tbkm.onrender.com/docs")
-          echo "✓ Docs endpoint responded with code: $response"
-
-      - name: Ping Specific Routes
-        run: |
-          set +e
-          echo "Pinging specific API routes to generate activity"
-
-          # List of endpoints to ping (light, read-only operations)
-          endpoints=(
-            "https://prompt-master-tbkm.onrender.com/api/v1"
-            "https://prompt-master-tbkm.onrender.com/api/v1/prompts"
-          )
-
-          for endpoint in "${endpoints[@]}"; do
-            echo "Pinging: $endpoint"
-            curl -s -m 30 -X GET "$endpoint" \
-              -H "User-Agent: KeepAlive-Bot/1.0" \
-              -H "Accept: application/json" \
-              > /dev/null 2>&1 || true
-            sleep 2
-          done
-          echo "✓ API routes pinged"
+          echo "Pinging root endpoint to keep service warm"
+          curl -L -s -o /dev/null -w "Response code: %{http_code}\n" \
+            --connect-timeout 20 \
+            --max-time 30 \
+            -H "User-Agent: GitHub-KeepAlive-Bot/1.0" \
+            "https://prompt-master-tbkm.onrender.com/" || true
+          echo "✓ Root endpoint pinged"
 
       - name: Log Success
         if: success()
         run: |
           echo "✅ Keep-alive check completed successfully at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-          echo "Next scheduled run in 10 minutes"
+          echo "   IST time: $(TZ='Asia/Kolkata' date +'%Y-%m-%d %H:%M:%S IST')"
+          echo "Next scheduled run in 14 minutes"
 
       - name: Log Failure
         if: failure()
         run: |
-          echo "❌ Keep-alive check encountered issues"
-          echo "This may indicate the service is experiencing problems or is unreachable"
+          echo "❌ Keep-alive check encountered issues at $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "   IST time: $(TZ='Asia/Kolkata' date +'%Y-%m-%d %H:%M:%S IST')"
+          echo ""
+          echo "Possible causes:"
+          echo "  1. Render service is taking longer than expected to spin up (>60s)"
+          echo "  2. Service may be down or experiencing issues"
+          echo "  3. Network connectivity problems"
+          echo "  4. SSL/TLS certificate issues"
+          echo ""
+          echo "Note: Render free tier services can take 50+ seconds to spin up from cold start"
