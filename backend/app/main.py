@@ -4,6 +4,7 @@ Main FastAPI application entry point.
 """
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -49,6 +50,41 @@ app = FastAPI(
 # Add rate limiter to app state
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# Custom middleware to handle health checks without CORS restrictions
+@app.middleware("http")
+async def health_check_middleware(request: Request, call_next):
+    """Middleware to allow unrestricted GET access to public health endpoints.
+    
+    Note: This only affects browser requests. Server-to-server requests (like GitHub Actions)
+    don't send Origin headers and aren't subject to CORS restrictions.
+    """
+    # Allow unrestricted GET access to public informational endpoints
+    public_paths = ["/health", "/"]
+    
+    if request.url.path in public_paths:
+        # If it's an OPTIONS request (CORS preflight), handle it
+        if request.method == "OPTIONS":
+            return JSONResponse(
+                content={},
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                    "Access-Control-Allow-Headers": "Accept, User-Agent",
+                }
+            )
+        
+        # Only allow GET/HEAD methods without CORS restriction (read-only public data)
+        if request.method in ["GET", "HEAD"]:
+            response = await call_next(request)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, HEAD, OPTIONS"
+            return response
+    
+    # For all other endpoints, proceed normally (CORS middleware will handle)
+    return await call_next(request)
+
 
 # Configure CORS
 app.add_middleware(
