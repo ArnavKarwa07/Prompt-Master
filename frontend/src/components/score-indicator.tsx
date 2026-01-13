@@ -34,10 +34,16 @@ function getScoreLabel(score: number): string {
   return "Poor";
 }
 
-function getScoreIcon(score: number) {
-  if (score >= 80) return Award;
-  if (score >= 60) return TrendingUp;
-  return AlertCircle;
+function ScoreIcon({
+  score,
+  className,
+}: {
+  score: number;
+  className?: string;
+}) {
+  if (score >= 80) return <Award className={className} />;
+  if (score >= 60) return <TrendingUp className={className} />;
+  return <AlertCircle className={className} />;
 }
 
 export function ScoreIndicator({
@@ -74,8 +80,6 @@ export function ScoreIndicator({
     md: { container: "w-32 h-32", text: "text-3xl", label: "text-sm" },
     lg: { container: "w-40 h-40", text: "text-4xl", label: "text-base" },
   };
-
-  const Icon = getScoreIcon(score);
 
   return (
     <div className={cn("flex flex-col items-center gap-3", className)}>
@@ -139,7 +143,10 @@ export function ScoreIndicator({
       </div>
 
       <div className="flex items-center gap-2">
-        <Icon className={cn("w-4 h-4", getScoreColor(score))} />
+        <ScoreIcon
+          className={cn("w-4 h-4", getScoreColor(score))}
+          score={score}
+        />
         <span className={cn("font-medium", sizes[size].label)}>
           {getScoreLabel(score)}
         </span>
