@@ -523,11 +523,17 @@ export default function DashboardPage() {
                 <PromptOptimizer
                   projectId={selectedProject?.id}
                   onResult={async () => {
-                    // Ensure token is fresh before fetching history
-                    const token = await getToken();
-                    api.setToken(token);
-                    const response = await api.getHistory(historyLimit);
-                    setHistory(response.history);
+                    try {
+                      // Ensure token is fresh before fetching history
+                      const token = await getToken();
+                      api.setToken(token);
+                      const response = await api.getHistory(historyLimit);
+                      setHistory(response.history);
+                    } catch (err) {
+                      // Silently ignore background refresh failures —
+                      // the optimized result is already shown in the UI
+                      console.warn("[Dashboard] Background history refresh failed:", err);
+                    }
                   }}
                 />
               </TabsContent>

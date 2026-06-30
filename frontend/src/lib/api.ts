@@ -92,38 +92,84 @@ class ApiClient {
     return headers;
   }
 
+  /**
+   * Returns true for transient network errors that are safe to retry
+   * (e.g. ERR_NETWORK_CHANGED, ERR_CONNECTION_CLOSED, "Failed to fetch").
+   */
+  private isNetworkError(err: unknown): boolean {
+    if (err instanceof TypeError) return true; // "Failed to fetch"
+    if (err instanceof DOMException && err.name === "AbortError") return false;
+    return false;
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {},
-    retryOnAuth: boolean = true
+    retryOnAuth: boolean = true,
+    networkRetries: number = 2
   ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
 
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        ...this.getHeaders(),
-        ...options.headers,
-      },
-    });
+    let lastError: unknown;
 
-    // Handle token expiration - refresh and retry once
-    if (response.status === 401 && retryOnAuth && this.tokenRefreshCallback) {
-      const newToken = await this.refreshToken();
-      if (newToken) {
-        // Retry the request with new token
-        return this.request<T>(endpoint, options, false);
+    for (let attempt = 0; attempt <= networkRetries; attempt++) {
+      // Exponential back-off between network retries (skip on first attempt)
+      if (attempt > 0) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, 500 * Math.pow(2, attempt - 1))
+        );
+      }
+
+      try {
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            ...this.getHeaders(),
+            ...options.headers,
+          },
+        });
+
+        // Handle token expiration - refresh and retry once
+        if (
+          response.status === 401 &&
+          retryOnAuth &&
+          this.tokenRefreshCallback
+        ) {
+          const newToken = await this.refreshToken();
+          if (newToken) {
+            return this.request<T>(endpoint, options, false, 0);
+          }
+        }
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          console.error(`[API] Error ${endpoint}:`, error);
+          throw new Error(error.detail || `API Error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data;
+      } catch (err) {
+        lastError = err;
+
+        // Only retry on transient network errors, not on HTTP errors
+        const isHttpError =
+          err instanceof Error &&
+          err.message.startsWith("API Error:");
+        if (!this.isNetworkError(err) || isHttpError) {
+          throw err;
+        }
+
+        if (attempt < networkRetries) {
+          console.warn(
+            `[API] Network error on ${endpoint} (attempt ${attempt + 1}/${networkRetries + 1}), retrying…`,
+            err
+          );
+        }
       }
     }
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      console.error(`[API] Error ${endpoint}:`, error);
-      throw new Error(error.detail || `API Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
+    throw lastError;
   }
 
   // ============ Prompt Endpoints ============

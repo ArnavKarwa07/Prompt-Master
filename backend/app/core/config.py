@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     debug: bool = False
     
     # LLM Models (Groq)
-    primary_model: str = "llama-3.3-70b-versatile"
-    secondary_model: str = "llama-3.1-8b-instant"
+    primary_model: str = "gpt-oss-120b"
+    secondary_model: str = "gpt-oss-20b"
     
     # Vector Configuration
     embedding_dimension: int = 1536
